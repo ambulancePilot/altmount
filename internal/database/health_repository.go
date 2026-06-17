@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"log/slog"
+	"path"
 	"strings"
 	"time"
 )
@@ -30,8 +31,24 @@ func NewHealthRepository(db *sql.DB, d Dialect) *HealthRepository {
 // repair state machine relies on. Every method that writes or matches on file_path
 // funnels through here.
 func normalizeHealthPath(p string) string {
-	p = strings.TrimPrefix(p, "/")
-	return strings.ReplaceAll(p, `\`, "/")
+	if p == "" {
+		return ""
+	}
+	// 1. Convert backslashes to forward slashes first so clean works predictably
+	p = strings.ReplaceAll(p, `\`, "/")
+	
+	// 2. Clean up internal double-slashes (e.g. a//b -> a/b)
+	p = path.Clean(p)
+	
+	// 3. Aggressively strip ALL leading slashes to prevent //sonarr mismatches
+	p = strings.TrimLeft(p, "/")
+	
+	// path.Clean might return "." if the string is empty after trimming
+	if p == "." {
+		return ""
+	}
+	
+	return p
 }
 
 // escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
@@ -218,7 +235,6 @@ func (r *HealthRepository) UnmaskFile(ctx context.Context, filePath string) erro
 	return nil
 }
 
-// GetUnhealthyFiles returns files that need health checks
 // GetUnhealthyFiles returns files that need health checks
 func (r *HealthRepository) GetUnhealthyFiles(ctx context.Context, limit int, strategy string, libraryDir string, maxRetries int) ([]*FileHealth, error) {
 	query := `
@@ -1023,9 +1039,9 @@ func (r *HealthRepository) DeleteHealthRecordsBulk(ctx context.Context, filePath
 
 		placeholders := make([]string, len(chunk))
 		args := make([]any, len(chunk))
-		for j, path := range chunk {
+		for j, p := range chunk {
 			placeholders[j] = "?"
-			args[j] = strings.TrimPrefix(path, "/")
+			args[j] = normalizeHealthPath(p)
 		}
 
 		query := fmt.Sprintf(`DELETE FROM file_health WHERE file_path IN (%s)`, strings.Join(placeholders, ","))
@@ -1066,9 +1082,9 @@ func (r *HealthRepository) ResetHealthChecksBulk(ctx context.Context, filePaths 
 		placeholders := make([]string, len(chunk))
 		args := make([]any, 0, len(chunk)+1)
 		args = append(args, string(HealthStatusPending))
-		for j, path := range chunk {
+		for j, p := range chunk {
 			placeholders[j] = "?"
-			args = append(args, path)
+			args = append(args, normalizeHealthPath(p))
 		}
 
 		query := fmt.Sprintf(`
@@ -1652,7 +1668,7 @@ func (r *HealthRepository) batchInsertAutomaticHealthChecks(ctx context.Context,
 // that exist in the specified directory. This is used when a new file is imported
 // into a directory, implying it is a replacement for the broken file.
 func (r *HealthRepository) ResolvePendingRepairsInDirectory(ctx context.Context, dirPath string) (int64, error) {
-	dirPath = strings.TrimPrefix(dirPath, "/")
+	dirPath = strings.TrimLeft(dirPath, "/")
 	if dirPath == "" {
 		return 0, nil
 	}
@@ -1707,8 +1723,8 @@ func (r *HealthRepository) UpdateLibraryPath(ctx context.Context, filePath strin
 
 // RenameHealthRecord updates the file_path of a health record or records under a directory after a MOVE operation
 func (r *HealthRepository) RenameHealthRecord(ctx context.Context, oldPath, newPath string) error {
-	oldPath = strings.TrimPrefix(oldPath, "/")
-	newPath = strings.TrimPrefix(newPath, "/")
+	oldPath = strings.TrimLeft(oldPath, "/")
+	newPath = strings.TrimLeft(newPath, "/")
 
 	tx, err := r.db.BeginTx(ctx, nil)
 	if err != nil {
@@ -1891,9 +1907,9 @@ func (r *HealthRepository) GetFilesByPaths(ctx context.Context, filePaths []stri
 	// Build placeholders for the IN clause
 	placeholders := make([]string, len(filePaths))
 	args := make([]any, len(filePaths))
-	for i, path := range filePaths {
+	for i, p := range filePaths {
 		placeholders[i] = "?"
-		args[i] = strings.TrimPrefix(path, "/")
+		args[i] = normalizeHealthPath(p)
 	}
 
 	query := fmt.Sprintf(`
