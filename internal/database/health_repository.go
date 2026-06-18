@@ -51,6 +51,15 @@ func normalizeHealthPath(p string) string {
 	return p
 }
 
+// normalizeHealthPathPtr safely normalizes string pointers
+func normalizeHealthPathPtr(p *string) *string {
+	if p == nil {
+		return nil
+	}
+	norm := normalizeHealthPath(*p)
+	return &norm
+}
+
 // escapeLikePrefix escapes the LIKE metacharacters in a literal prefix so it can be
 // safely concatenated into a "prefix/%" pattern. Release/folder names routinely
 // contain '_' (matches any single char) and occasionally '%' (matches any run), which
@@ -683,6 +692,8 @@ func (r *HealthRepository) AddFileToHealthCheck(ctx context.Context, filePath st
 // counter. A successful health check resets it to 0.
 func (r *HealthRepository) AddFileToHealthCheckWithMetadata(ctx context.Context, filePath string, libraryPath *string, maxRetries int, maxRepairRetries int, sourceNzbPath *string, priority HealthPriority, releaseDate *time.Time, metadata *string, indexer *string) error {
 	filePath = normalizeHealthPath(filePath)
+	// Nomalize libary path as well.
+	libraryPath = normalizeHealthPathPtr(libraryPath)
 	var releaseDateStr any = nil
 	if releaseDate != nil {
 		releaseDateStr = releaseDate.UTC().Format("2006-01-02 15:04:05")
@@ -770,7 +781,7 @@ func (r *HealthRepository) batchUpsertFileHealthCheck(ctx context.Context, recor
 		}
 
 		args = append(args,
-			normalizeHealthPath(rec.FilePath), rec.LibraryPath,
+			normalizeHealthPath(rec.FilePath), normalizeHealthPathPtr(rec.LibraryPath),
 			rec.MaxRetries, rec.MaxRepairRetries,
 			rec.SourceNzbPath, rec.Priority, releaseDateStr, rec.Metadata, rec.Indexer)
 	}
