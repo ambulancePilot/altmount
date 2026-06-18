@@ -453,7 +453,8 @@ func TestAddFileToHealthCheckWithMetadata_StoresLibraryPath(t *testing.T) {
 	ctx := context.Background()
 
 	filePath := "Movies/Dune (2021)/Dune (2021).mkv"
-	libraryPath := "/mnt/library/Movies/Dune (2021)/Dune (2021).mkv"
+	// Leading slash removed for Windows compatibility
+	libraryPath := "mnt/library/Movies/Dune (2021)/Dune (2021).mkv"
 	sourceNzb := "Dune.nzb"
 
 	// Add the file
